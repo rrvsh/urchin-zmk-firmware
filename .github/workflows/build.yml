@@ -1,28 +1,6 @@
 name: Reusable user config build
 
-on:
-  workflow_call:
-    inputs:
-      build_matrix_path:
-        description: "Path to the build matrix file"
-        default: "build.yaml"
-        required: false
-        type: string
-      config_path:
-        description: "Path to the config directory"
-        default: "config"
-        required: false
-        type: string
-      fallback_binary:
-        description: "Fallback binary format, if no *.uf2 file was built"
-        default: "bin"
-        required: false
-        type: string
-      archive_name:
-        description: "Archive output file name"
-        default: "firmware"
-        required: false
-        type: string
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   matrix:
@@ -36,8 +14,8 @@ jobs:
 
       - name: Fetch Build Matrix
         run: |
-          echo "build_matrix=$(yq -oj -I0 '${{ inputs.build_matrix_path }}')" >> $GITHUB_ENV
-          yq -oj "${{ inputs.build_matrix_path }}"
+          echo "build_matrix=$(yq -oj -I0 'build.yaml')" >> $GITHUB_ENV
+          yq -oj "build.yaml"
 
   build:
     runs-on: ubuntu-latest
@@ -49,12 +27,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.build_matrix) }}
     steps:
-      - name: Act Workaround # https://github.com/nektos/act/issues/973
-        if: ${{ env.ACT }}
-        run: |
-          apt-get update && apt-get install -y curl unzip
-          curl -fsSL https://deb.nodesource.com/setup_22.x | bash && apt install -y nodejs
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -92,8 +64,8 @@ jobs:
       - name: Copy config files to isolated temporary directory
         run: |
           if [ "${{ env.base_dir }}" != "${GITHUB_WORKSPACE}" ]; then
-            mkdir "${{ env.base_dir }}/${{ inputs.config_path }}"
-            cp -R ${{ inputs.config_path }}/* "${{ env.base_dir }}/${{ inputs.config_path }}/"
+            mkdir "${{ env.base_dir }}/config"
+            cp -R config/* "${{ env.base_dir }}/config/"
           fi
 
       - name: Cache west modules
@@ -116,7 +88,7 @@ jobs:
 
       - name: West Init
         working-directory: ${{ env.base_dir }}
-        run: west init -l "${{ env.base_dir }}/${{ inputs.config_path }}"
+        run: west init -l "${{ env.base_dir }}/config"
 
       - name: West Update
         working-directory: ${{ env.base_dir }}
@@ -136,7 +108,7 @@ jobs:
       - name: West Build (${{ env.display_name }})
         working-directory: ${{ env.base_dir }}
         shell: sh -x {0}
-        run: west build -s zmk/app -d "${{ env.build_dir }}" -b "${{ matrix.board }}" ${{ env.extra_west_args }} -- -DZMK_CONFIG=${{ env.base_dir }}/${{ inputs.config_path }} ${{ env.extra_cmake_args }} ${{ matrix.cmake-args }}
+        run: west build -s zmk/app -d "${{ env.build_dir }}" -b "${{ matrix.board }}" ${{ env.extra_west_args }} -- -DZMK_CONFIG=${{ env.base_dir }}/config ${{ env.extra_cmake_args }} ${{ matrix.cmake-args }}
 
       - name: Warn about building from main if build fails
         if: failure() && env.zmk_revision == 'main'
@@ -177,9 +149,9 @@ jobs:
           if [ -f "${{ env.build_dir }}/zephyr/zmk.uf2" ]
           then
             cp "${{ env.build_dir }}/zephyr/zmk.uf2" "${{ env.build_dir }}/artifacts/${{ env.artifact_name }}.uf2"
-          elif [ -f "${{ env.build_dir }}/zephyr/zmk.${{ inputs.fallback_binary }}" ]
+          elif [ -f "${{ env.build_dir }}/zephyr/zmk.bin" ]
           then
-            cp "${{ env.build_dir }}/zephyr/zmk.${{ inputs.fallback_binary }}" "${{ env.build_dir }}/artifacts/${{ env.artifact_name }}.${{ inputs.fallback_binary }}"
+            cp "${{ env.build_dir }}/zephyr/zmk.bin" "${{ env.build_dir }}/artifacts/${{ env.artifact_name }}.bin"
           fi
 
       - name: Archive (${{ env.display_name }})
@@ -196,6 +168,6 @@ jobs:
       - name: Merge Artifacts
         uses: actions/upload-artifact/merge@v4
         with:
-          name: ${{ inputs.archive_name }}
+          name: firmware
           pattern: artifact-*
           delete-merged: true
